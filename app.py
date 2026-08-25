@@ -29,7 +29,15 @@ import logging
 from datetime import datetime
 
 from flask import Flask, request
+from dotenv import load_dotenv
 import africastalking
+
+import sms_store
+
+# Load variables from a local .env file into the environment. Must happen
+# before we read any os.environ.get(...) calls below, so this import stays
+# right after the other imports, not further down the file.
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # 1. CONFIG & INITIALISATION
@@ -63,6 +71,10 @@ try:
         logger.warning("AT_API_KEY not set — SMS sending is disabled until you configure it.")
 except Exception as exc:  # noqa: BLE001 - top-level init guard, we want to catch anything here
     logger.error("Failed to initialise Africa's Talking SDK: %s", exc)
+
+# Create the sms_logs table if it doesn't exist yet. Safe to call on every
+# startup — it's a no-op if the table's already there.
+sms_store.init_db()
 
 
 # ---------------------------------------------------------------------------
@@ -120,17 +132,37 @@ def send_sms(phone_number: str, message: str) -> bool:
     decide whether to tell the user "check your SMS" or not.
     Never raises — a failed SMS should not crash the USSD session, since
     the user is still mid-call and needs *some* response either way.
+
+    Every attempt (sent or failed) is logged to sms_logs, keyed by a
+    pseudonymised phone hash rather than the raw number — same privacy
+    approach as case reports, see _pseudonymise.
     """
+    phone_hash = _pseudonymise(phone_number)
+
     if sms_client is None:
         logger.warning("SMS not sent (client not configured): %s", message)
+        sms_store.log_sms("outgoing", phone_hash, message, status="not_configured")
         return False
 
     try:
         response = sms_client.send(message, [phone_number], sender_id=AT_SENDER_ID)
         logger.info("SMS sent to %s: %s", phone_number, response)
+
+        # Africa's Talking's SDK response nests per-recipient results; pull
+        # out a message id if present, purely for traceability in the logs.
+        at_message_id = None
+        try:
+            recipients = response.get("SMSMessageData", {}).get("Recipients", [])
+            if recipients:
+                at_message_id = recipients[0].get("messageId")
+        except Exception:  # noqa: BLE001 - response shape is best-effort, never worth failing over
+            pass
+
+        sms_store.log_sms("outgoing", phone_hash, message, status="sent", at_message_id=at_message_id)
         return True
     except Exception as exc:  # noqa: BLE001 - external API call, catch broadly and log
         logger.error("Failed to send SMS to %s: %s", phone_number, exc)
+        sms_store.log_sms("outgoing", phone_hash, message, status="failed")
         return False
 
 
@@ -324,7 +356,49 @@ def update_case_status(tracking_code):
 
 
 # ---------------------------------------------------------------------------
-# 6. HEALTH CHECK — useful once this is deployed behind a load balancer
+# 6. INCOMING SMS — Africa's Talking POSTs here whenever someone texts your
+#    shortcode/number directly (not through a USSD session). Configure this
+#    URL in the AT dashboard under SMS > Callback URLs > Incoming Messages.
+#    AT sends form fields including: from, to, text, id, linkId, date.
+# ---------------------------------------------------------------------------
+
+@app.route("/sms/incoming", methods=["POST"])
+def sms_incoming():
+    try:
+        sender = request.values.get("from", "")
+        text = request.values.get("text", "")
+        at_message_id = request.values.get("id", "")
+
+        phone_hash = _pseudonymise(sender)
+        sms_store.log_sms("incoming", phone_hash, text, at_message_id=at_message_id)
+
+        logger.info("Incoming SMS logged (hash=%s): %s", phone_hash, text)
+
+        # Africa's Talking just needs a 200 OK to know we received it —
+        # no specific body format required for incoming SMS callbacks.
+        return "", 200
+
+    except Exception as exc:  # noqa: BLE001 - webhook must not 500, or AT will retry indefinitely
+        logger.exception("Unhandled error in incoming SMS callback: %s", exc)
+        return "", 200
+
+
+# ---------------------------------------------------------------------------
+# 7. ADMIN: view logged SMS — for demo/debugging. Same caveat as the case
+#    status endpoint below: unauthenticated here for demo speed only, put
+#    this behind real auth before any non-hackathon use.
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/sms/logs", methods=["GET"])
+def sms_logs():
+    direction = request.args.get("direction")  # optional: 'outgoing' or 'incoming'
+    limit = min(int(request.args.get("limit", 100)), 500)  # cap to avoid huge responses
+    logs = sms_store.get_logs(limit=limit, direction=direction)
+    return {"count": len(logs), "logs": logs}, 200
+
+
+# ---------------------------------------------------------------------------
+# 8. HEALTH CHECK — useful once this is deployed behind a load balancer
 # ---------------------------------------------------------------------------
 
 @app.route("/", methods=["GET"])
