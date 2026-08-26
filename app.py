@@ -188,20 +188,29 @@ def send_sms(phone_number: str, message: str) -> bool:
 
     try:
         response = sms_client.send(message, [phone_number], sender_id=AT_SENDER_ID)
-        logger.info("SMS sent to %s: %s", phone_number, response)
+        recipients = response.get("SMSMessageData", {}).get("Recipients", [])
+        recipient = recipients[0] if recipients else {}
+        at_message_id = recipient.get("messageId")
+        delivery_status = str(recipient.get("status", "")).lower()
+        accepted_statuses = {"sent", "queued", "submitted"}
+        sms_accepted = delivery_status in accepted_statuses
+        log_status = delivery_status or "unknown"
 
-        # Africa's Talking's SDK response nests per-recipient results; pull
-        # out a message id if present, purely for traceability in the logs.
-        at_message_id = None
-        try:
-            recipients = response.get("SMSMessageData", {}).get("Recipients", [])
-            if recipients:
-                at_message_id = recipients[0].get("messageId")
-        except Exception:  # noqa: BLE001 - response shape is best-effort, never worth failing over
-            pass
-
-        sms_store.log_sms("outgoing", phone_hash, message, status="sent", at_message_id=at_message_id)
-        return True
+        logger.info(
+            "SMS API response for %s: status=%s message_id=%s response=%s",
+            phone_number,
+            log_status,
+            at_message_id,
+            response,
+        )
+        sms_store.log_sms(
+            "outgoing",
+            phone_hash,
+            message,
+            status=log_status,
+            at_message_id=at_message_id,
+        )
+        return sms_accepted
     except Exception as exc:  # noqa: BLE001 - external API call, catch broadly and log
         logger.error("Failed to send SMS to %s: %s", phone_number, exc)
         sms_store.log_sms("outgoing", phone_hash, message, status="failed")
