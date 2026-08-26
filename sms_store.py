@@ -16,12 +16,14 @@ that swapping the storage backend later is a small, contained change.
 
 import sqlite3
 import logging
+import os
 from datetime import datetime
 from contextlib import contextmanager
 
 logger = logging.getLogger("haki-legal-aid.sms_store")
 
-DB_PATH = "sms_logs.db"
+DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sms_logs.db")
+DB_PATH = os.environ.get("SMS_DB_PATH", DEFAULT_DB_PATH)
 
 
 @contextmanager
@@ -36,6 +38,10 @@ def _connect():
 
 def init_db():
     """Creates the sms_logs table if it doesn't already exist. Call once at startup."""
+    db_directory = os.path.dirname(DB_PATH)
+    if db_directory:
+        os.makedirs(db_directory, exist_ok=True)
+
     with _connect() as conn:
         conn.execute(
             """

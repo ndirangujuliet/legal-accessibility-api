@@ -63,6 +63,11 @@ Copy the `https://xxxx.ngrok-free.app` URL it gives you.
 4. SMS sent by the app will show up in the sandbox's **SMS logs**, since
    sandbox SMS doesn't actually deliver to real phones.
 
+SMS log records created by this app are available at `/admin/sms/logs`. On
+Render, attach a persistent disk and set `SMS_DB_PATH` to its mount path,
+for example `/var/data/sms_logs.db`; otherwise SQLite data is lost on a
+redeploy or service restart.
+
 ## 4. Testing the flow
 
 Try walking through:

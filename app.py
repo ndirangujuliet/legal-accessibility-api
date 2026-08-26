@@ -105,6 +105,19 @@ RIGHTS_CONTENT = {
     },
 }
 
+SW_RIGHTS_CONTENT = {
+    "1": {"title": "Haki ukikamatwa", "summary": "Una haki ya kukaa kimya, kujua sababu ya kukamatwa, kupata wakili, na kufikishwa kortini ndani ya saa 24."},
+    "2": {"title": "Haki za ajira", "summary": "Una haki ya mkataba wa maandishi, mshahara wa chini, mazingira salama ya kazi, na taarifa kabla ya kufutwa kazi."},
+    "3": {"title": "Haki za mpangaji", "summary": "Mwenye nyumba lazima akupe taarifa ya maandishi kabla ya kukufukuza na hawezi kukufungia nje bila amri ya korti."},
+}
+
+SW_CATEGORIES = {
+    "1": "Mgogoro wa ardhi / mali",
+    "2": "Tatizo la kazini",
+    "3": "Tatizo la polisi / kukamatwa",
+    "4": "Nyingine",
+}
+
 
 # ---------------------------------------------------------------------------
 # 3. HELPERS
@@ -178,12 +191,25 @@ def send_sms(phone_number: str, message: str) -> bool:
 #   "END <message>"  -> show <message> and terminate the session
 # ---------------------------------------------------------------------------
 
-@app.route("/ussd", methods=["POST"])
+@app.route("/ussd", methods=["GET", "POST"])
+@app.route("/ussd/", methods=["GET", "POST"])
 def ussd_callback():
+    if request.method == "GET":
+        return "USSD endpoint is live. Send POST requests from Africa's Talking.", 200, {
+            "Content-Type": "text/plain"
+        }
+
     try:
         session_id = request.values.get("sessionId", "")
         phone_number = request.values.get("phoneNumber", "")
         text = request.values.get("text", "")
+
+        logger.info(
+            "USSD callback hit: session_id=%s phone=%s text='%s'",
+            session_id,
+            phone_number,
+            text,
+        )
 
         # Split the accumulated journey into individual steps.
         # text == ""  -> user has just dialled in, show the main menu.
@@ -205,15 +231,18 @@ def ussd_callback():
 def _route(steps, phone_number):
     """Pure routing logic, separated from the Flask handler so it's easy to unit test."""
 
-    # --- Level 0: main menu -------------------------------------------------
+    # The first digit selects the language; the remaining digits are menu input.
     if len(steps) == 0:
-        return (
-            "CON Welcome to Haki Legal Aid\n"
-            "1. Know Your Rights\n"
-            "2. Legal Aid Hotline\n"
-            "3. Report a Case\n"
-            "4. Track My Case"
-        )
+        return "CON Chagua lugha / Choose language\n1. English\n2. Kiswahili"
+
+    language = "sw" if steps[0] == "2" else "en" if steps[0] == "1" else None
+    if language is None:
+        return "END Invalid language. Dial again and choose 1 or 2."
+    steps = steps[1:]
+    if len(steps) == 0:
+        if language == "sw":
+            return "CON Karibu Haki Legal Aid\n1. Jua Haki Zako\n2. Nambari ya Msaada wa Kisheria\n3. Ripoti Kesi\n4. Fuatilia Kesi"
+        return "CON Welcome to Haki Legal Aid\n1. Know Your Rights\n2. Legal Aid Hotline\n3. Report a Case\n4. Track My Case"
 
     top = steps[0]
 
@@ -221,63 +250,53 @@ def _route(steps, phone_number):
     if top == "1":
         if len(steps) == 1:
             menu = "CON Choose a topic:\n"
-            for key, item in RIGHTS_CONTENT.items():
+            content = SW_RIGHTS_CONTENT if language == "sw" else RIGHTS_CONTENT
+            menu = "CON Chagua mada:\n" if language == "sw" else menu
+            for key, item in content.items():
                 menu += f"{key}. {item['title']}\n"
             return menu.rstrip()
 
         choice = steps[1]
-        topic = RIGHTS_CONTENT.get(choice)
+        topic = (SW_RIGHTS_CONTENT if language == "sw" else RIGHTS_CONTENT).get(choice)
         if not topic:
             return "END Invalid option. Please dial in again and try another number."
 
         # Send the fuller text via SMS since USSD screens are tiny (~160 chars).
         sms_sent = send_sms(
             phone_number,
-            f"Haki Legal Aid — {topic['title']}: {topic['summary']} "
-            f"For more help call our hotline: {LEGAL_AID_HOTLINE}",
+            (f"Haki Legal Aid — {topic['title']}: {topic['summary']} "
+             f"Kwa msaada zaidi piga: {LEGAL_AID_HOTLINE}" if language == "sw" else
+             f"Haki Legal Aid — {topic['title']}: {topic['summary']} For more help call our hotline: {LEGAL_AID_HOTLINE}"),
         )
-        note = "We've also sent this to you via SMS." if sms_sent else ""
+        note = "Tumekutumia pia kwa SMS." if language == "sw" and sms_sent else "We've also sent this to you via SMS." if sms_sent else ""
         return f"END {topic['title']}: {topic['summary']} {note}".rstrip()
 
     # --- Branch 2: Legal Aid Hotline ----------------------------------------
     if top == "2":
         sms_sent = send_sms(
             phone_number,
-            f"Haki Legal Aid Hotline: {LEGAL_AID_HOTLINE}. Save this number — "
-            f"it's free to call and staffed by legal aid volunteers.",
+            (f"Nambari ya Msaada wa Kisheria ya Haki Legal Aid: {LEGAL_AID_HOTLINE}. "
+             f"Hifadhi nambari hii." if language == "sw" else
+             f"Haki Legal Aid Hotline: {LEGAL_AID_HOTLINE}. Save this number — it's free to call and staffed by legal aid volunteers."),
         )
-        note = "We've also texted you the number." if sms_sent else ""
+        note = "Tumekutumia nambari hii kwa SMS." if language == "sw" and sms_sent else "We've also texted you the number." if sms_sent else ""
         return f"END Legal Aid Hotline: {LEGAL_AID_HOTLINE}. {note}".rstrip()
 
     # --- Branch 3: Report a Case (anonymous) --------------------------------
     if top == "3":
         if len(steps) == 1:
-            return (
-                "CON What type of case are you reporting?\n"
-                "1. Land / Property Dispute\n"
-                "2. Workplace Issue\n"
-                "3. Police / Arrest Issue\n"
-                "4. Other"
-            )
+            if language == "sw":
+                return "CON Unaripoti kesi ya aina gani?\n1. Mgogoro wa ardhi / mali\n2. Tatizo la kazini\n3. Tatizo la polisi / kukamatwa\n4. Nyingine"
+            return "CON What type of case are you reporting?\n1. Land / Property Dispute\n2. Workplace Issue\n3. Police / Arrest Issue\n4. Other"
 
         if len(steps) == 2:
-            category_map = {
-                "1": "Land / Property Dispute",
-                "2": "Workplace Issue",
-                "3": "Police / Arrest Issue",
-                "4": "Other",
-            }
+            category_map = SW_CATEGORIES if language == "sw" else {"1": "Land / Property Dispute", "2": "Workplace Issue", "3": "Police / Arrest Issue", "4": "Other"}
             if steps[1] not in category_map:
                 return "END Invalid option. Please dial in again and try another number."
-            return "CON Briefly describe what happened (a few words is fine):"
+            return "CON Eleza kwa ufupi kilichotokea:" if language == "sw" else "CON Briefly describe what happened (a few words is fine):"
 
         if len(steps) == 3:
-            category_map = {
-                "1": "Land / Property Dispute",
-                "2": "Workplace Issue",
-                "3": "Police / Arrest Issue",
-                "4": "Other",
-            }
+            category_map = SW_CATEGORIES if language == "sw" else {"1": "Land / Property Dispute", "2": "Workplace Issue", "3": "Police / Arrest Issue", "4": "Other"}
             category = category_map.get(steps[1], "Other")
             # steps[2] onward is the free-text description. If the user's
             # description itself contained a "*", rejoin it here so we don't
@@ -298,29 +317,26 @@ def _route(steps, phone_number):
 
             sms_sent = send_sms(
                 phone_number,
-                f"Haki Legal Aid: your report was received. "
-                f"Tracking code: {tracking_code}. Dial back and choose "
-                f"'Track My Case' with this code to check status. Keep it safe.",
+                (f"Haki Legal Aid: ripoti yako imepokelewa. Aina: {category}. "
+                 f"Maelezo: {description}. Nambari ya ufuatiliaji: {tracking_code}." if language == "sw" else
+                 f"Haki Legal Aid: your report was received. Type: {category}. Details: {description}. Tracking code: {tracking_code}. Dial back and choose 'Track My Case' with this code to check status. Keep it safe."),
             )
-            note = "It's also been sent to you via SMS." if sms_sent else ""
+            note = "Imetumwa pia kwa SMS." if language == "sw" and sms_sent else "It's also been sent to you via SMS." if sms_sent else ""
             return (
-                f"END Report submitted. Your tracking code is {tracking_code}. {note}"
+                (f"END Ripoti imetumwa. Nambari yako ya ufuatiliaji ni {tracking_code}. {note}" if language == "sw" else f"END Report submitted. Your tracking code is {tracking_code}. {note}")
             ).rstrip()
 
     # --- Branch 4: Track My Case ---------------------------------------------
     if top == "4":
         if len(steps) == 1:
-            return "CON Enter your tracking code (e.g. HK-3F9A2B):"
+            return "CON Weka nambari yako ya ufuatiliaji (mf. HK-3F9A2B):" if language == "sw" else "CON Enter your tracking code (e.g. HK-3F9A2B):"
 
         code = steps[1].strip().upper()
         record = CASE_REPORTS.get(code)
         if not record:
-            return "END No case found with that tracking code. Please check and try again."
+            return "END Hakuna kesi iliyopatikana. Hakikisha nambari na ujaribu tena." if language == "sw" else "END No case found with that tracking code. Please check and try again."
 
-        return (
-            f"END Case {code} ({record['category']}): status is "
-            f"'{record['status']}'. Submitted {record['created_at'][:10]}."
-        )
+        return (f"END Kesi {code} ({record['category']}): hali ni '{record['status']}'. Iliwasilishwa {record['created_at'][:10]}." if language == "sw" else f"END Case {code} ({record['category']}): status is '{record['status']}'. Submitted {record['created_at'][:10]}.")
 
     # --- Fallback -------------------------------------------------------------
     return "END Invalid option. Please dial in again and try another number."
@@ -409,4 +425,8 @@ def health_check():
 if __name__ == "__main__":
     # debug=True is fine for local dev / hackathon demo. Turn it OFF in
     # production (see README) and run behind gunicorn instead.
-    app.run(debug=True, port=5000)
+    app.run(
+        debug=True,
+        host=os.environ.get("FLASK_HOST", "0.0.0.0"),
+        port=int(os.environ.get("PORT", "5000")),
+    )
