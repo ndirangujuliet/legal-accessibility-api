@@ -389,11 +389,25 @@ def _route(steps, phone_number):
 
         if steps[2] == "1":
             PETITION_SIGNERS.setdefault(petition_id, set()).add(_pseudonymise(phone_number))
-            return "END Umesaini ombi. Asante kwa kushiriki." if language == "sw" else "END Petition signed. Thank you for participating."
+            sms_sent = send_sms(
+                phone_number,
+                (f"Haki Legal Aid: Umesaini ombi '{petition['title']}'. Asante kwa kushiriki."
+                 if language == "sw" else
+                 f"Haki Legal Aid: You signed the petition '{petition['title']}'. Thank you for participating."),
+            )
+            note = " Ujumbe umetumwa kwa SMS." if language == "sw" and sms_sent else " SMS confirmation sent." if sms_sent else ""
+            return ("END Umesaini ombi. Asante kwa kushiriki." if language == "sw" else "END Petition signed. Thank you for participating.") + note
 
         if steps[2] == "2":
             ACTION_PARTICIPANTS.setdefault(petition_id, set()).add(_pseudonymise(phone_number))
-            return (f"END Umejiunga na hatua: {petition['action']}. Asante kwa kushiriki." if language == "sw" else f"END You joined the action: {petition['action']}. Thank you for participating.")
+            sms_sent = send_sms(
+                phone_number,
+                (f"Haki Legal Aid: Umejiunga na hatua '{petition['action']}' kuhusu '{petition['title']}'. Asante kwa kushiriki."
+                 if language == "sw" else
+                 f"Haki Legal Aid: You joined the action '{petition['action']}' for '{petition['title']}'. Thank you for participating."),
+            )
+            note = " Ujumbe umetumwa kwa SMS." if language == "sw" and sms_sent else " SMS confirmation sent." if sms_sent else ""
+            return (f"END Umejiunga na hatua: {petition['action']}. Asante kwa kushiriki." if language == "sw" else f"END You joined the action: {petition['action']}. Thank you for participating.") + note
 
         return "END Chaguo si sahihi. Tafadhali jaribu tena." if language == "sw" else "END Invalid choice. Please try again."
 
