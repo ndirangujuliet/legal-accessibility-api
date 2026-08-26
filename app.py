@@ -192,7 +192,7 @@ def send_sms(phone_number: str, message: str) -> bool:
         recipient = recipients[0] if recipients else {}
         at_message_id = recipient.get("messageId")
         delivery_status = str(recipient.get("status", "")).lower()
-        accepted_statuses = {"sent", "queued", "submitted"}
+        accepted_statuses = {"success", "sent", "queued", "submitted"}
         sms_accepted = delivery_status in accepted_statuses
         log_status = delivery_status or "unknown"
 
