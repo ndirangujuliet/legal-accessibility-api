@@ -312,6 +312,7 @@ def _route(steps, phone_number):
                 "description": description,
                 "reporter_hash": _pseudonymise(phone_number),
                 "status": "Received",
+                "court_date": None,
                 "created_at": datetime.utcnow().isoformat(),
             }
 
@@ -336,7 +337,8 @@ def _route(steps, phone_number):
         if not record:
             return "END Hakuna kesi iliyopatikana. Hakikisha nambari na ujaribu tena." if language == "sw" else "END No case found with that tracking code. Please check and try again."
 
-        return (f"END Kesi {code} ({record['category']}): hali ni '{record['status']}'. Iliwasilishwa {record['created_at'][:10]}." if language == "sw" else f"END Case {code} ({record['category']}): status is '{record['status']}'. Submitted {record['created_at'][:10]}.")
+        court_date = record.get("court_date") or ("Haijawekwa" if language == "sw" else "Not set")
+        return (f"END Kesi {code} ({record['category']}): hali ni '{record['status']}'. Tarehe ya korti: {court_date}. Iliwasilishwa {record['created_at'][:10]}." if language == "sw" else f"END Case {code} ({record['category']}): status is '{record['status']}'. Court date reminder: {court_date}. Submitted {record['created_at'][:10]}.")
 
     # --- Fallback -------------------------------------------------------------
     return "END Invalid option. Please dial in again and try another number."
@@ -359,6 +361,7 @@ def update_case_status(tracking_code):
     to notify people, stored more securely than the report content itself.
     """
     new_status = request.form.get("status")
+    court_date = request.form.get("court_date")
     record = CASE_REPORTS.get(tracking_code.upper())
 
     if not record:
@@ -367,8 +370,14 @@ def update_case_status(tracking_code):
         return {"error": "status field is required"}, 400
 
     record["status"] = new_status
+    if court_date is not None:
+        record["court_date"] = court_date.strip() or None
     logger.info("Case %s status updated to '%s'", tracking_code, new_status)
-    return {"tracking_code": tracking_code, "status": new_status}, 200
+    return {
+        "tracking_code": tracking_code,
+        "status": new_status,
+        "court_date": record.get("court_date"),
+    }, 200
 
 
 # ---------------------------------------------------------------------------
