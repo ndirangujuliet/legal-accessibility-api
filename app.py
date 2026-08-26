@@ -118,6 +118,35 @@ SW_CATEGORIES = {
     "4": "Nyingine",
 }
 
+PETITIONS = {
+    "1": {
+        "title": "Protect Tenants from Illegal Eviction",
+        "summary": "Support stronger protection and proper notice for tenants.",
+        "action": "Community legal awareness meeting",
+    },
+    "2": {
+        "title": "Improve Access to Legal Aid",
+        "summary": "Support accessible legal services for every community.",
+        "action": "Legal aid awareness walk",
+    },
+}
+
+SW_PETITIONS = {
+    "1": {
+        "title": "Linda wapangaji dhidi ya kufukuzwa kinyume cha sheria",
+        "summary": "Unga mkono ulinzi bora na taarifa sahihi kwa wapangaji.",
+        "action": "Mkutano wa uhamasishaji wa sheria kwa jamii",
+    },
+    "2": {
+        "title": "Boresha upatikanaji wa msaada wa kisheria",
+        "summary": "Unga mkono huduma za kisheria zinazopatikana kwa kila jamii.",
+        "action": "Matembezi ya uhamasishaji wa msaada wa kisheria",
+    },
+}
+
+PETITION_SIGNERS = {}
+ACTION_PARTICIPANTS = {}
+
 
 # ---------------------------------------------------------------------------
 # 3. HELPERS
@@ -241,8 +270,8 @@ def _route(steps, phone_number):
     steps = steps[1:]
     if len(steps) == 0:
         if language == "sw":
-            return "CON Karibu Haki Legal Aid\n1. Jua Haki Zako\n2. Nambari ya Msaada wa Kisheria\n3. Ripoti Kesi\n4. Fuatilia Kesi"
-        return "CON Welcome to Haki Legal Aid\n1. Know Your Rights\n2. Legal Aid Hotline\n3. Report a Case\n4. Track My Case"
+            return "CON Karibu Haki Legal Aid\n1. Jua Haki Zako\n2. Nambari ya Msaada wa Kisheria\n3. Ripoti Kesi\n4. Fuatilia Kesi\n5. Petitions na Uhamasishaji"
+        return "CON Welcome to Haki Legal Aid\n1. Know Your Rights\n2. Legal Aid Hotline\n3. Report a Case\n4. Track My Case\n5. Petitions and Mobilization"
 
     top = steps[0]
 
@@ -339,6 +368,34 @@ def _route(steps, phone_number):
 
         court_date = record.get("court_date") or ("Haijawekwa" if language == "sw" else "Not set")
         return (f"END Kesi {code} ({record['category']}): hali ni '{record['status']}'. Tarehe ya korti: {court_date}. Iliwasilishwa {record['created_at'][:10]}." if language == "sw" else f"END Case {code} ({record['category']}): status is '{record['status']}'. Court date reminder: {court_date}. Submitted {record['created_at'][:10]}.")
+
+    # --- Branch 5: Petitions and mobilization -------------------------------
+    if top == "5":
+        petitions = SW_PETITIONS if language == "sw" else PETITIONS
+        if len(steps) == 1:
+            heading = "CON Chagua ombi la kusaini:" if language == "sw" else "CON Choose a petition to sign:"
+            return heading + "\n" + "\n".join(
+                f"{key}. {petition['title']}" for key, petition in petitions.items()
+            )
+
+        petition = petitions.get(steps[1])
+        if not petition:
+            return "END Chaguo si sahihi. Tafadhali jaribu tena." if language == "sw" else "END Invalid petition. Please try again."
+
+        petition_id = steps[1]
+        if len(steps) == 2:
+            prompt = "1. Saini ombi\n2. Jiunge na hatua" if language == "sw" else "1. Sign petition\n2. Join action"
+            return f"CON {petition['title']}\n{petition['summary']}\n{prompt}"
+
+        if steps[2] == "1":
+            PETITION_SIGNERS.setdefault(petition_id, set()).add(_pseudonymise(phone_number))
+            return "END Umesaini ombi. Asante kwa kushiriki." if language == "sw" else "END Petition signed. Thank you for participating."
+
+        if steps[2] == "2":
+            ACTION_PARTICIPANTS.setdefault(petition_id, set()).add(_pseudonymise(phone_number))
+            return (f"END Umejiunga na hatua: {petition['action']}. Asante kwa kushiriki." if language == "sw" else f"END You joined the action: {petition['action']}. Thank you for participating.")
+
+        return "END Chaguo si sahihi. Tafadhali jaribu tena." if language == "sw" else "END Invalid choice. Please try again."
 
     # --- Fallback -------------------------------------------------------------
     return "END Invalid option. Please dial in again and try another number."
